@@ -3,6 +3,21 @@ using Photon.Pun;
 using System.Collections;
 using UnityEngine;
 
+/// <summary>
+/// 포톤 네트워크(Photon PUN2) 기반의 플레이어 캐릭터 컨트롤러 클래스입니다.
+/// 로컬 플레이어의 입력 처리, Rigidbody 기반 이동, 
+/// 애니메이션 제어 및 네트워크 객체 간의 위치/일부 상태 값 동기화를 관리합니다.
+/// </summary>
+/// <remarks>
+/// 주요 기능:
+/// - 카메라 방향 기반의 이동 및 경사면 보정 로직
+/// - 점프, 슬라이딩, 낙하 등 상태 플래그 및 애니메이션 파라미터 기반 캐릭터 상태 처리
+/// - 아이템 인벤토리 및 타겟팅 시스템 연동
+/// - Rideable 오브젝트 탑승을 위한 Parenting 기반 플랫폼 처리
+/// - 네트워크 보간(Lerp)을 이용한 원격 플레이어 움직임 최적화
+/// </remarks>
+///
+
 [RequireComponent(typeof(Rigidbody), typeof(PhotonView))]
 public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
 {
@@ -27,7 +42,7 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
     private bool jumpRequested;
     private bool isFalling = false;
     [Tooltip("점프력을 높일땐 무조건 이 변수 값도 높여야 함. 낙하 속도 판정.")]
-    public float fallingSpeed = 5f;
+    public float fallingSpeed = 5f; // 낙하 애니메이션 전환 기준 속도
 
     // NOTE : Movement와 연관됨.
     [Header("Camera")]
@@ -52,7 +67,6 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
     [HideInInspector] public int checkpointIndex = -1; // -1 = 시작지점
     [SerializeField] LayerMask rideableLayers; // 탈 수 있는 플랫폼만(예 : 회전 원판)
 
-    //LSH아이템테스트
     [SerializeField] TargetingSystem targetingSystem;
     [SerializeField] PlayerSkillItemInventory inventory;
     [SerializeField] float checkInterval = 0.2f;
@@ -60,11 +74,7 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
     private float cooldownTimer = 0f;
     private float checkTimer;
     private bool networkIsFalling;
-    private Transform currentPlatform;
-    private Quaternion lastPlatformRotation;
-    private Vector3 lastPlatformPosition;
     public ShieldTing shield;
-    //
 
     [Header("Effects")]
     public ParticleSystem wallHitParticle;
@@ -82,16 +92,16 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
         rb.freezeRotation = true;
         anim = GetComponent<Animator>();
         col = GetComponent<CapsuleCollider>();
-        //LSH아이템테스트
+
         targetingSystem = GetComponent<TargetingSystem>();
         inventory = GetComponent<PlayerSkillItemInventory>();
         checkTimer = checkInterval;
-        //
 
         playerSliding = GetComponent<PlayerSliding>();
-        //isSliding = false;
+
         jumpRequested = false;
 
+        // 오프라인 모드 대응
         if (!PhotonNetwork.IsConnected && !PhotonNetwork.OfflineMode)
         {
             PhotonNetwork.OfflineMode = true;
@@ -99,6 +109,7 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
             if (rb.isKinematic) rb.isKinematic = false;
         }
 
+        // 내 캐릭터와 타 캐릭터의 물리 설정 구분
         if (photonView.IsMine)
         {
             rb.isKinematic = false;
@@ -143,7 +154,6 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
             CamControl();
             Movement();
 
-            //LSH아이템테스트
             SkillItemData currentItem = inventory.PeekSkillItem(0);
             if (currentItem == null) return;
 
@@ -161,7 +171,6 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
                 case SkillItemType.EnemyInstant:
                     if (Input.GetMouseButtonDown(1))
                     {
-                        Debug.Log("즉발형 우클릭 다운");
                         inventory.UseSkillItem(0);
                         cooldownTimer = useCooldown;
                     }
@@ -170,7 +179,6 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
                 case SkillItemType.Targeted:
                     if (Input.GetMouseButton(1)) // 우클릭 유지
                     {
-                        Debug.Log("타겟팅 우클릭 유지");
                         checkTimer -= Time.deltaTime;
                         if (checkTimer <= 0f)
                         {
@@ -180,7 +188,6 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
                     }
                     if (Input.GetMouseButtonUp(1)) // 우클릭 뗌
                     {
-                        Debug.Log("타겟팅 우클릭 업");
                         Transform target = targetingSystem.CurrentTarget;
                         inventory.UseSkillItem(0, target);
                         targetingSystem.ClearTarget();
@@ -200,26 +207,6 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
 
         if (photonView.IsMine)
         {
-            if (currentPlatform != null)
-            {
-                // 회전 동기화
-                Quaternion rotationDelta = currentPlatform.rotation * Quaternion.Inverse(lastPlatformRotation);
-                rb.MoveRotation(rotationDelta * rb.rotation);
-
-                // 위치 동기화.
-                Vector3 positionDelta = currentPlatform.position - lastPlatformPosition;
-                rb.MovePosition(rb.position + positionDelta);
-
-                // 회전/이동 추적 업데이트
-                lastPlatformRotation = currentPlatform.rotation;
-                lastPlatformPosition = currentPlatform.position;
-
-                // 점프 등으로 지면을 벗어나면 탑승 상태 해제
-                if (!isGrounded)
-                {
-                    currentPlatform = null;
-                }
-            }
             if (isSliding)
             {
                 moveDir = Vector3.zero;
@@ -242,7 +229,6 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
             {
                 if (previousVY < -minLandSpeed)
                 {
-                    //Vector3 landPos = transform.position + Vector3.down * (col.height / 2f) + Vector3.up * 0.3f;
                     Vector3 landPos = Vector3.down * (col.height / 2f) + Vector3.up * 1f;
                     photonView.RPC(nameof(PlayParticleRPC), RpcTarget.All, PARTICLE_LAND, landPos, Quaternion.Euler(-90f, 0f, 0f));
                 }
@@ -251,6 +237,7 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
         }
         else
         {
+            // 네트워크를 통한 원격 캐릭터 위치 보간
             transform.position = Vector3.Lerp(transform.position, networkPos, Time.fixedDeltaTime * 10f);
             transform.rotation = Quaternion.Lerp(transform.rotation, networkRot, Time.fixedDeltaTime * 10f);
 
@@ -266,14 +253,14 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
     {
         if (moveDir.sqrMagnitude > 0.01f)
         {
-            // 움직임(낮은 장애물 지나가는)
+            // 움직임(낮은 턱 자동 오르기)
             CheckAndStepUp();
 
             Vector3 targetVel = moveDir * moveSpeed;
             Vector3 velocityChange = targetVel - new Vector3(rb.velocity.x, 0, rb.velocity.z);
             rb.AddForce(velocityChange * accel, ForceMode.Acceleration);
 
-            // Rotation Logic
+            // 경사면 고려한 캐릭터 회전 로직
             Vector3 groundNormal = Vector3.up;
             if (Physics.Raycast(transform.position, Vector3.down, out RaycastHit slopeHit, 1.0f, groundMask))
             {
@@ -288,7 +275,7 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
         }
         else
         {
-            // Prevent sliding when stop
+            // 정지 시 미끄러짐 방지
             rb.velocity = new Vector3(Mathf.Lerp(rb.velocity.x, 0, accel * Time.fixedDeltaTime), rb.velocity.y, Mathf.Lerp(rb.velocity.z, 0, accel * Time.fixedDeltaTime));
         }
     }
@@ -306,9 +293,9 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
                 photonView.RPC(nameof(JumpRPC), RpcTarget.All);
             else
                 JumpRPC();
-            //LSH오디오
+            
             SFXEvents.Raise(SFXKey.Jump, transform.position, true, false);
-            //
+            
             isGrounded = false;
             jumpRequested = false;
         }
@@ -352,16 +339,16 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
         if (newIndex > checkpointIndex)
         {
             checkpointIndex = newIndex;
-            Debug.Log($"[PlayerController] Checkpoint updated: {checkpointIndex}");
         }
         else
         {
-            Debug.Log($"[PlayerController] Checkpoint {newIndex} ignored, current: {checkpointIndex}");
+            //Debug.Log($"[PlayerController] Checkpoint {newIndex} ignored, current: {checkpointIndex}");
         }
     }
 
     // OnPhotonSerializeView is a required function of the IPunObservable interface.
     // This function is used to send and receive data over the network.
+    // 포톤 네트워크 동기화
     public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
     {
         // Local Player : Send to others ; Position, Rotation, Speed
@@ -389,6 +376,7 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
     }
 
     // BoxCast : detect low obstacles(ex : bump)
+    // 낮은 장애물 만났을 때 살짝 띄워주는 로직
     void CheckAndStepUp()
     {
         RaycastHit hit;
@@ -398,7 +386,7 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
 
         if (Physics.BoxCast(boxCenter, boxSize, transform.forward, out hit, transform.rotation, rayDistance, groundMask))
         {
-            // Detect if it's lower than knee
+            // 무릎보다 낮으면 탐지
             float characterKneeY = transform.position.y + GetComponent<CapsuleCollider>().center.y - (GetComponent<CapsuleCollider>().height / 4f);
             if (hit.point.y < characterKneeY)
             {
@@ -430,8 +418,7 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
         isNudged = true;
         if (anim != null)
             anim.SetBool("IsNudged", true);
-
-        //Vector3 nudgePos = transform.position + Vector3.up * (col.center.y + col.height / 2f + 0.1f);
+            
         Vector3 nudgePos = Vector3.up * (col.center.y + col.height / 2f + 0.01f);
 
         photonView.RPC(nameof(PlayParticleRPC), RpcTarget.All, PARTICLE_NUDGE, nudgePos, Quaternion.Euler(-90f, 0, 0));
@@ -473,8 +460,6 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
         float x = Input.GetAxis("Horizontal");
         float z = Input.GetAxis("Vertical");
 
-        //HACK: 강욱-0926: x==0 대신 Mathf.Approximately(x,0) 사용
-        //if (x==0 && z==0 && !Input.GetKeyDown(KeyCode.Space))
         if (Mathf.Approximately(x, 0) && Mathf.Approximately(z, 0) && !Input.GetKeyDown(KeyCode.Space))
         {
             moveDir = Vector3.zero;
@@ -539,17 +524,14 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
                 particlePrefab = nudgeParticle;
                 break;
             default:
-                Debug.LogError($"{type} is not supported.");
                 return;
         }
 
         if(particlePrefab == null)
         {
-            Debug.LogError("파티클 프리팹 연결 안 됨");
             return;
         }
 
-        //ParticleSystem newPart = Instantiate(particlePrefab, pos, rot);
         ParticleSystem newPart = null;
         
         newPart = Instantiate(particlePrefab, transform);
@@ -604,8 +586,6 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
 
     void OnTriggerEnter(Collider other)
     {
-        Debug.Log($"[Trigger] Entered with: {other.name}, Tag: {other.tag}");
-
         if (!photonView.IsMine) return; // 자신만 처리
 
         if (other.CompareTag("Water"))
@@ -629,12 +609,10 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
             PhotonNetwork.Destroy(gameObject);
         }
 
-        //LSH테스트소리
         if (other.CompareTag("SkillItemBox"))
         {
             AudioManager.Instance.PlayOneShotSFX(SFXKey.GetItem, transform.position);
         }
-        //
     }
 
     void OnDrawGizmos()
@@ -667,8 +645,6 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
         string csv = string.Join(",", RaceManager.Instance.stageFourDNFActors);
         var props = new ExitGames.Client.Photon.Hashtable() { { "StageFourDNF", csv } };
         PhotonNetwork.CurrentRoom.SetCustomProperties(props);
-
-        Debug.Log($"[RPC_ReportDNF] Player {actorNumber} marked as DNF.");
     }
 
     //LSH테스트소리
@@ -676,5 +652,4 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
     {
         AudioManager.Instance.PlayPooledSFX(SFXKey.Footstep, transform.position);
     }
-    //
 }

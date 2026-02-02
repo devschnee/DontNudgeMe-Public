@@ -3,14 +3,22 @@ using Photon.Pun;
 using UnityEngine;
 using UnityEngine.UI;
 
+/// <summary>
+/// 캐릭터 커스터마이징 UI 패널을 제어하는 클래스.
+/// - 파츠 선택(Head / Body / Shoes)
+/// - 색상(Hue) 실시간 미리보기
+/// - Firebase 저장 및 Photon Custom Properties 동기화
+/// </summary>
+
 public class CustomizeSelectPanel : MonoBehaviour
 {
-    public CharacterCustom customizer;
+    public CharacterCustom customizer; // 실제 커스터마이징 로직을 담당하는 객체
     public CustomizePanelController panelController;
 
     [Header("Hue Sliders")]
     public Slider head, body, shoes;
 
+    // ===== 파츠 변경 =====
     public void NextHead() => customizer.Next(ItemCategory.Head);
     public void PrevHead() => customizer.Prev(ItemCategory.Head);
     public void NextBody() => customizer.Next(ItemCategory.Body);
@@ -45,17 +53,17 @@ public class CustomizeSelectPanel : MonoBehaviour
         // Firebase 저장 + Photon 전송
         try
         {
+            // Firebase에 커스터마이징 데이터 저장
             await customizer.SaveToFirebase();
-            //위의 과정에서 이미 CustomizationData.Local은 변함.
-            //저장이 잘 되고 나면 패널컨트롤러가 커스터마이징패널을 닫도록 함(오버레이도 같이 사라짐)
-            //포톤네트워크: 로컬의 커스텀프로퍼티 주작
+            
+            // 저장 과정에서 CustomizationData.Local은 이미 최신 상태
+            // 해당 데이터를 Photon Custom Properties로 전파
             PhotonNetwork.SetPlayerCustomProperties(CustomizationData.Local.ToPhoton());
            
             panelController.ClosePanel();
         }
         catch (FirebaseException fe)
         {
-            Debug.Log($"뭔지 몰라도 파이어베이스 에러남: {fe.Message}");
         }
 
         
@@ -66,6 +74,7 @@ public class CustomizeSelectPanel : MonoBehaviour
         ResetSlidersToDefault();
         if (customizer != null) customizer.ResetCustomization();
     }
+
     public void Open()
     {
         // 항상 리셋하고 열기
@@ -96,6 +105,8 @@ public class CustomizeSelectPanel : MonoBehaviour
                 handleImage.color = color; // 핸들 색 = 현재 선택 색상
         }
     }
+
+    // 모든 슬라이더를 기본 상태로 되돌림
     void ResetSlidersToDefault()
     {
         if (head) head.SetValueWithoutNotify(0f);

@@ -8,9 +8,20 @@ using Firebase.Database;
 using PhotonTable = ExitGames.Client.Photon.Hashtable;
 using Firebase;
 
-public enum ItemCategory { Head, Body, Shoes }
 
-// 파츠 하나(“아이템 옵션”): 여러 GameObject(헬멧+자켓+바지)도 한 세트로 묶을 수 있음
+/// <summary>
+/// 커스터마이징 가능한 아이템 카테고리 정의
+/// </summary>
+#region enum Item Category
+public enum ItemCategory { Head, Body, Shoes }
+#endregion
+
+/// <summary>
+/// 하나의 아이템 옵션을 표현하는 데이터 구조.
+/// - 하나의 옵션이 여러 GameObject(헬멧 + 상의 + 하의 등)를 포함할 수 있음
+/// - id는 Firebase / Photon 동기화를 위한 고유 키
+/// </summary>
+#region class Item Option
 [Serializable]
 public class ItemOption
 {
@@ -24,8 +35,13 @@ public class ItemOption
     [Tooltip("URP Lit이면 _BaseColor")]
     public string colorProperty = "_BaseColor";
 }
+#endregion
 
-// 카테고리별 아이템 목록
+/// <summary>
+/// 카테고리별 아이템 묶음
+/// - 현재 선택된 인덱스와 색상 상태를 함께 관리
+/// </summary>
+#region class Item Category Set
 [Serializable]
 public class ItemCategorySet
 {
@@ -35,7 +51,16 @@ public class ItemCategorySet
     [HideInInspector] public int currentIndex = -1; // -1이면 아무것도 선택 안 함
     [HideInInspector] public Color currentColor = Color.white;
 }
+#endregion
 
+/// <summary>
+/// 캐릭터 외형 커스터마이징을 담당하는 핵심 클래스.
+/// - 로컬 미리보기
+/// - Firebase 저장
+/// - Photon Custom Properties 변환
+/// - 네트워크 인스턴스/로컬 인스턴스 모두 대응
+/// </summary>
+#region  class Character Custom
 public class CharacterCustom : MonoBehaviourPunCallbacks
 {
     [Header("Categories")]
@@ -80,29 +105,20 @@ public class CharacterCustom : MonoBehaviourPunCallbacks
 
     void Start()
     {
-        //커스터마이즈용 캐릭터 말고, 실제 게임플레이로 네트워크 인스턴시에이트 되고 나서도 생각해야 함.
-        //지금은 스타트에서 무조건 로컬 데이터를 적용시키는 것으로 처리.
-        //스폰되는 LocalCharacter는 이 스크립트를 달고 있음...
-        //각 클라이언트가 가진 커스텀프로퍼티를 받아오는 작업은 스테이지매니저에서 먼저 해두고,
-        //얘는 해당 스테이지매니저 인스턴스가 가진 커스텀프로퍼티 목록을 받아와서 데이터를 적용시켜주면 되겠다.
-        
-        //TODO: 강욱 - 0929: 사실상 지금 모든 캐릭터의 외형을 로컬데이터로 한번 적용시킨 뒤에 해당 캐릭터의 커스텀프로퍼티로 반영하는 처리 중임.
-        //상당히 불필요하고 더러운 처리이므로 방법 강구 필요
-
+        // PhotonView 존재: 실제 게임 플레이 캐릭터
+        // PhotonView 없음: 로컬 커스터마이징 미리보기
         if (TryGetComponent<PhotonView>(out PhotonView view))
         {
-            //만약 캐릭터커스텀에 포톤뷰까지 붙어있다면? => 게임스테이지 진행 중인 상태.
             ApplyData(PhotonManager.Instance.customizationDict[view.Owner.UserId]);
         }
         else
         {
-            //포톤뷰가 안 붙어있다면 => 로컬에서만 보이는 상태임.
-            //그냥 로컬의 커스터마이제이션데이터 적용.
             ApplyData(CustomizationData.Local);
         }
     }
 
     // Stickman제외 모두 off
+    //(모든 커스터마이징 가능한 파츠 GameObject를 수집)
     private void ToggleablesList()
     {
         toggleables = new HashSet<GameObject>();
@@ -119,6 +135,7 @@ public class CharacterCustom : MonoBehaviourPunCallbacks
         }
     }
 
+    // 모든 파츠를 끄고 기본 바디 상태로 초기화
     void SetAllOff()
     {
         if (toggleables == null) ToggleablesList();
@@ -147,9 +164,6 @@ public class CharacterCustom : MonoBehaviourPunCallbacks
 
         set.currentColor = Color.white;
         ApplySelection(cat, next);
-
-        //HACK: 0929-강욱: 다음 선택/이전 선택을 할 때마다 커스텀프로퍼티를 바꿀 필요는 없음. 저장 시점에 해야 함.
-        //BroadcastToPhoton();
     }
 
     public void Prev(ItemCategory cat)
@@ -161,8 +175,6 @@ public class CharacterCustom : MonoBehaviourPunCallbacks
         if (prev < -1) prev = set.options.Length - 1;
         set.currentColor = Color.white;
         ApplySelection(cat, prev);
-        //HACK: 0929-강욱: 다음 선택/이전 선택을 할 때마다 커스텀프로퍼티를 바꿀 필요는 없음. 저장 시점에 해야 함.
-        //BroadcastToPhoton();
     }
 
     ItemCategorySet GetSet(ItemCategory cat)
@@ -171,19 +183,19 @@ public class CharacterCustom : MonoBehaviourPunCallbacks
         return null;
     }
 
-    // Apply Items
+    // 특정 카테고리에 대한 아이템 선택 적용
     public void ApplySelection(ItemCategory cat, int index)
     {
         var set = GetSet(cat);
         if (set == null) return;
 
-        // off
+        // 이전 선택 해제
         if (set.currentIndex >= 0 && set.currentIndex < set.options.Length)
             ToggleItem(set.options[set.currentIndex], false);
 
         set.currentIndex = index;
 
-        // on
+        // 새 선택 적용
         if (index >= 0 && index < set.options.Length)
         {
             ToggleItem(set.options[index], true);
@@ -238,6 +250,7 @@ public class CharacterCustom : MonoBehaviourPunCallbacks
             }
         }
     }
+
     public void SetColor(ItemCategory cat, Color color, bool overrideAllMats = false)
     {
         var set = GetSet(cat);
@@ -252,6 +265,8 @@ public class CharacterCustom : MonoBehaviourPunCallbacks
         }
     }
 
+    // 현재 선택된 아이템에 색상 적용
+    // (원본 색상 * 선택 색상 방식)
     void ApplyColor(ItemCategory cat, Color color, ItemOption opt)
     {
         if (opt == null || opt.parts == null) return;
@@ -282,14 +297,6 @@ public class CharacterCustom : MonoBehaviourPunCallbacks
                     Color baseColor = originals[i];  // 항상 원본 기준
                     Color multiplied = baseColor * color;
                     mats[i].SetColor(prop, multiplied);
-                    //Color baseColor = originals[i];
-                    //Color.RGBToHSV(baseColor, out float hBase, out float s, out float v);
-                    //Color.RGBToHSV(color, out float hNew, out _, out _);
-
-                    //// Hue만 교체, 원래 S/V 유지
-                    //Color final = Color.HSVToRGB(hNew, s, v);
-
-                    //mats[i].SetColor(prop, final);
                 }
             }
         }
@@ -308,13 +315,8 @@ public class CharacterCustom : MonoBehaviourPunCallbacks
         return false;
     }
 
-    //TODO: 로직 수정 필요함. 무조건 리셋하는 게 아니라, 로컬의 커스터마이징 정보를 받아와서 리셋해야 함.
-    //CustomizationData.Local이 의미하는 것: 초기 Firebase DB에서 받아온 이 클라이언트 인스턴스만의 CustomizationData
-    //TODO: 커스터마이징 창을 그냥 닫으면 색상이 리셋되는 버그가 있음. 로직에서 해당 처리하는 부분을 찾아서 좀 바꿔줘야 할 것같음.
     public void ResetCustomization()
     {
-        //HACK: 0928-강욱: 로컬 커스터마이제이션 데이터가 있으면 로컬의 데이터를 적용하는 로직으로 덮어씌웁니다.
-        //아마 else문 아래로는 정상적인 상황이라면 실행 안 될 것임
         if (CustomizationData.Local != null)
         {
             ApplyData(CustomizationData.Local);
@@ -376,31 +378,15 @@ public class CharacterCustom : MonoBehaviourPunCallbacks
             var data = BuildData();
             string json = JsonUtility.ToJson(data);
             await CustomizeDataRef.SetRawJsonValueAsync(json);
-            Debug.Log("[Customizer] Saved to Firebase: " + json);
 
-            //여기서 문제가 안 터졌으면 잘 저장이 된 것이므로
-            //로컬 커스터마이징데이터를 덮어씌움.
+            // 저장 성공 시 로컬 데이터 갱신
             CustomizationData.Local = data;
-            Debug.Log("[Customizer] Override Local Data: " + json);
-        } catch (FirebaseException fe)
+        } 
+        catch (FirebaseException fe)
         {
             Debug.Log(fe.Message);
         }
     }
-
-    //HACK: 0929-강욱: 이제 FirebaseManager의 FetchCustomizationDataFromFirebase()가 이 일을 대신 수행합니다.
-    //public async Task LoadFromFirebase(bool alsoBroadcastPhoton = true)
-    //{
-    //    var snap = await CustomizeDataRef.GetValueAsync();
-    //    if (snap == null || !snap.Exists) return;
-
-    //    var data = JsonUtility.FromJson<CustomizationData>(snap.GetRawJsonValue());
-    //    ApplyData(data);
-
-    //    if (alsoBroadcastPhoton) BroadcastToPhoton();
-
-    //    Debug.Log("[Customizer] Loaded from Firebase.");
-    //}
 
     // PUN2 동기화
     void BroadcastToPhoton()
@@ -408,16 +394,6 @@ public class CharacterCustom : MonoBehaviourPunCallbacks
         if (!PhotonNetwork.InRoom) return;
         PhotonNetwork.LocalPlayer.SetCustomProperties(BuildData().ToPhoton());
     }
-
-    //HACK: 0929-강욱: 필요 없습니다.
-    //public override void OnPlayerPropertiesUpdate(Player targetPlayer, PhotonTable changedProps)
-    //{
-    //    if (photonView != null && targetPlayer == photonView.Owner)
-    //    {
-    //        if (CustomizationData.TryFromPhoton(changedProps, out var data))
-    //            ApplyData(data);
-    //    }
-    //}
 
     // 직렬화/역직렬화
     CustomizationData BuildData()
@@ -459,13 +435,7 @@ public class CharacterCustom : MonoBehaviourPunCallbacks
         return true;
     }
 
-    //TODO: 이거 중요한듯.
-    //파이어베이스 로그인 할 때 인증정보 받아오고 나서
-    //커스터마이징 정보도 같이 받아오기.
-    //커스터마이징 정보 받아오고 나면 로컬로 저장(게스트는 해당 없음.)
-    //로컬로 저장된 커스터마이징 정보는 포톤 로그인하면서 커스텀프로퍼티화해서 각각의 유저에게 저장.
-    //이렇게 하면 포톤으로 새로 로그인할 때마다 DB에서도 커스터마이징 정보를 끌어와서 적용하게 됨.
-    //실제 게임 장면 내에서 유저들이 다른 유저의 Firebase DB를 건드리지 않고 포톤으로만 필요한 정보를 가져오기 좋은 방법 같음.
+    // 커스터마이징 데이터를 실제 캐릭터에 적용
     void ApplyData(CustomizationData d)
     {
         // 전부 끄고 다시 선택
@@ -475,7 +445,6 @@ public class CharacterCustom : MonoBehaviourPunCallbacks
         ApplyOne(ItemCategory.Body, d.bodyId, d.bodyColor, d.bodyAll);
         ApplyOne(ItemCategory.Shoes, d.shoesId, d.shoesColor, d.shoesAll);
 
-        //BroadcastToPhoton();
         if (stickmanBody) stickmanBody.SetActive(true);
     }
 
@@ -504,8 +473,10 @@ public class CharacterCustom : MonoBehaviourPunCallbacks
         return -1;
     }
 }
+#endregion
 
-// 직렬화 모델
+// 커스터마이징 데이터를 Firebase / Photon에서 공용으로 쓰기 위한 직렬화 모델
+#region class Customization Data
 [Serializable]
 public class CustomizationData
 {
@@ -547,7 +518,7 @@ public class CustomizationData
     /// </summary>
     public static void LocalToPhotonCP()
     {
-        if (Local == null) { Debug.Log("로컬 커스터마이징 데이터가 null임"); return; }
+        if (Local == null) { return; }
         if (Local != null) PhotonNetwork.SetPlayerCustomProperties(Local.ToPhoton());
     }
 
@@ -575,7 +546,10 @@ public class CustomizationData
         catch { return false; }
     }
 }
+#endregion
 
+// Color ↔ Hex 문자열 변환 유틸
+#region  static class Color Util
 public static class ColorUtil
 {
     // #RRGGBB or #RRGGBBAA
@@ -592,3 +566,4 @@ public static class ColorUtil
         return fallback;
     }
 }
+#endregion

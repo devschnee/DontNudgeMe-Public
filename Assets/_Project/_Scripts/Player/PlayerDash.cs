@@ -1,6 +1,14 @@
 ﻿using Photon.Pun;
 using UnityEngine;
 
+/// <summary>
+/// Player의 대시 이동 로직을 담당하는 컴포넌트.
+/// - 더블 탭 입력을 감지하여 대시
+/// - 카메라 기준 방향으로 대시 벡터 계산
+/// - Photon RPC를 통해 모든 클라이언트에 대시 이벤트 동기화
+/// - 로컬 플레이어만 쿨타임 및 실제 물리 이동을 처리
+/// </summary>
+/// 
 public class PlayerDash : MonoBehaviourPunCallbacks
 {
     private Rigidbody rb;
@@ -20,6 +28,7 @@ public class PlayerDash : MonoBehaviourPunCallbacks
     private float dashTimer;
     private Vector3 dashDir;
 
+    // 더블 탭 입력 판별용
     private KeyCode lastKey;
     private float lastTapTime;
 
@@ -49,6 +58,7 @@ public class PlayerDash : MonoBehaviourPunCallbacks
         if(Time.time < lastDashTime + dashCooltime) return;
 
         KeyCode currTapKey = KeyCode.None;
+         // 방향 키 입력 통합 처리 (WASD + 방향키)
         if (Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow)) currTapKey = KeyCode.W;
         else if (Input.GetKeyDown(KeyCode.S) || Input.GetKeyDown(KeyCode.DownArrow)) currTapKey = KeyCode.S;
         else if (Input.GetKeyDown(KeyCode.A) || Input.GetKeyDown(KeyCode.LeftArrow)) currTapKey = KeyCode.A;
@@ -56,7 +66,7 @@ public class PlayerDash : MonoBehaviourPunCallbacks
 
         if (currTapKey != KeyCode.None)
         {
-            // Double Tap Success Condition
+             // 동일 키를 일정 시간 내에 다시 입력했을 경우 더블 탭 성공
             if(currTapKey == lastKey && Time.time < lastTapTime + doubleTapWindow)
             {
                 Transform camPivot = pController.camPivot;
@@ -74,6 +84,7 @@ public class PlayerDash : MonoBehaviourPunCallbacks
                 else if(currTapKey == KeyCode.A) dashDir = -camRight;
                 else if(currTapKey == KeyCode.D) dashDir = camRight;
 
+                 // 유효한 방향일 경우 모든 클라이언트에 대시 이벤트 전파
                 if(dashDir.sqrMagnitude > 0.01f)
                 {
                     photonView.RPC(nameof(DashRPC), RpcTarget.All, dashDir.normalized);
@@ -84,6 +95,7 @@ public class PlayerDash : MonoBehaviourPunCallbacks
             }
             else
             {
+                // 첫 탭 기록
                 lastKey = currTapKey;
                 lastTapTime = Time.time;
             }
@@ -106,9 +118,8 @@ public class PlayerDash : MonoBehaviourPunCallbacks
     {
         if(dashTimer > 0)
         {
-            //LSH테스트소리
             AudioManager.Instance.PlayPooledSFX(SFXKey.Dash, transform.position);
-            //
+            // 대시 중에는 중력 영향을 줄여 수평 이동감을 강조
             rb.velocity = new Vector3(dashDir.x * dashForce, rb.velocity.y, dashDir.z * dashForce);
             dashTimer -= Time.fixedDeltaTime;
         }
